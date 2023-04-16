@@ -28,13 +28,11 @@ impl Event {
         guard
     }
 
-    pub fn notify_one(&self) -> bool {
+    pub fn notify_one(&self) {
         let old_node = self.chain.lock().pop_front();
         if let Some(old_node) = old_node {
             old_node.wake();
-            return true;
         }
-        false
     }
 
     pub fn notify_all(&self) {
