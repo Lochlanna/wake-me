@@ -72,7 +72,7 @@ impl Waker {
         (waker, sleeper)
     }
 
-    pub fn wake(&self) {
+    pub fn wake(&self) -> bool {
         let state = self.state.compare_exchange(
             State::Waiting as u8,
             State::Notified as u8,
@@ -81,13 +81,10 @@ impl Waker {
         );
         if state.is_ok() {
             self.inner.wake();
-            return;
+            return true;
         }
         debug_assert_eq!(state.unwrap_err(), State::Dropped as u8);
-    }
-
-    pub fn is_dropped(&self) -> bool {
-        self.state.load(Ordering::Acquire) == State::Dropped as u8
+        false
     }
 
     fn reset(&self) {
