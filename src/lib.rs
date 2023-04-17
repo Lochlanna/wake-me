@@ -108,4 +108,28 @@ mod tests {
             let _ = jh.join();
         })
     }
+    #[test]
+    fn drop_count() {
+        let event = Event::default();
+        let value = AtomicUsize::new(0);
+
+        thread::scope(|s| {
+            let jh = s.spawn(|| {
+                {
+                    let _guard_a = event.listen();
+                    let _guard_b = event.listen();
+                }
+                let guard_c = event.listen();
+                guard_c.wait();
+                assert_eq!(value.load(Ordering::Acquire), 42);
+            });
+            thread::sleep(Duration::from_millis(50));
+            value.store(42, Ordering::Release);
+            assert_eq!(event.num_listeners.load(Ordering::Acquire), 3);
+            event.notify_one();
+            assert_eq!(event.num_listeners.load(Ordering::Acquire), 0);
+
+            let _ = jh.join();
+        })
+    }
 }
