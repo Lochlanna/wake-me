@@ -86,6 +86,10 @@ impl Waker {
         debug_assert_eq!(state.unwrap_err(), State::Dropped as u8);
     }
 
+    pub fn is_dropped(&self) -> bool {
+        self.state.load(Ordering::Acquire) == State::Dropped as u8
+    }
+
     fn reset(&self) {
         self.state.store(State::Waiting as u8, Ordering::SeqCst);
     }

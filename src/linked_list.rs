@@ -134,13 +134,7 @@ impl<T> LinkedList<T> {
     }
 
     pub fn take_list(&mut self) -> Self {
-        let taken = Self {
-            head: self.head,
-            tail: self.tail,
-        };
-        self.head = None;
-        self.tail = None;
-        taken
+        std::mem::take(self)
     }
 
     pub fn iter_mut(&mut self) -> Cursor<T> {

@@ -5,38 +5,76 @@ mod waker;
 
 use crate::waker::Waker;
 use linked_list::{LinkedList, Node};
+use portable_atomic::{AtomicUsize, Ordering};
 
 pub use waker::{State, WaitGuard};
 
 #[derive(Debug, Default)]
 pub struct Event {
     chain: parking_lot::Mutex<LinkedList<Waker>>,
+    num_listeners: AtomicUsize,
 }
 
 impl Event {
     pub fn listen(&self) -> WaitGuard {
         let (waker, guard) = Waker::new();
         let node = Node::new(waker);
-        self.chain.lock().push_node_back(node);
+        {
+            let mut lock = self.chain.lock();
+            self.num_listeners.fetch_add(1, Ordering::Release);
+            lock.push_node_back(node);
+        }
         guard
     }
 
     pub fn listen_async(&self, waker: core::task::Waker) -> WaitGuard {
         let (waker, guard) = Waker::new_async(waker);
         let node = Node::new(waker);
-        self.chain.lock().push_node_back(node);
+        {
+            let mut lock = self.chain.lock();
+            self.num_listeners.fetch_add(1, Ordering::Release);
+            lock.push_node_back(node);
+        }
         guard
     }
 
     pub fn notify_one(&self) {
-        let old_node = self.chain.lock().pop_front();
-        if let Some(old_node) = old_node {
-            old_node.wake();
+        portable_atomic::fence(Ordering::SeqCst);
+        if self.num_listeners.load(Ordering::Acquire) == 0 {
+            return;
         }
+        let old_node;
+        {
+            let mut lock = self.chain.lock();
+            let mut count = 1;
+            loop {
+                if let Some(node) = lock.pop_front() {
+                    if !node.is_dropped() {
+                        old_node = node;
+                        break;
+                    }
+                } else {
+                    return;
+                }
+                count += 1;
+            }
+            self.num_listeners.fetch_sub(count, Ordering::Relaxed);
+        }
+        old_node.wake();
     }
 
     pub fn notify_all(&self) {
-        let mut old_chain = self.chain.lock().take_list();
+        portable_atomic::fence(Ordering::SeqCst);
+        if self.num_listeners.load(Ordering::Acquire) == 0 {
+            return;
+        }
+        let mut old_chain;
+        {
+            let mut lock = self.chain.lock();
+            self.num_listeners.store(0, Ordering::Relaxed);
+            old_chain = lock.take_list();
+        }
+
         for node in old_chain.iter_mut() {
             unsafe { node.as_ref() }.wake();
         }
