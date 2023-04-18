@@ -29,10 +29,17 @@ enum InnerWaker {
 }
 
 impl InnerWaker {
-    fn wake(&self) {
+    fn wake_by_ref(&self) {
         match self {
             InnerWaker::Sync(thread) => thread.unpark(),
             InnerWaker::Async(waker) => waker.wake_by_ref(),
+        }
+    }
+
+    fn wake(self) {
+        match self {
+            InnerWaker::Sync(thread) => thread.unpark(),
+            InnerWaker::Async(waker) => waker.wake(),
         }
     }
 }
@@ -51,7 +58,7 @@ impl Drop for Waker {
             Ordering::SeqCst,
             Ordering::Relaxed,
         );
-        self.inner.wake();
+        self.inner.wake_by_ref();
     }
 }
 
@@ -82,7 +89,7 @@ impl Waker {
             Ordering::Relaxed,
         );
         if state.is_ok() {
-            self.inner.wake();
+            self.inner.wake_by_ref();
             return true;
         }
         debug_assert_eq!(state.unwrap_err(), State::Dropped as u8);
