@@ -76,7 +76,7 @@ mod tests {
             let jh = s.spawn(|| {
                 let guard = event.listen();
                 assert_eq!(value.load(Ordering::Acquire), 0);
-                assert_eq!(guard.wait(), State::Notified);
+                assert_eq!(guard.get_state(), State::Notified);
                 assert_eq!(value.load(Ordering::Acquire), 42);
             });
             thread::sleep(Duration::from_millis(50));

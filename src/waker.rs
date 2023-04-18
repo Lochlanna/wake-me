@@ -1,6 +1,7 @@
 use portable_atomic::AtomicU8;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Instant;
 
 #[repr(u8)]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -50,6 +51,7 @@ impl Drop for Waker {
             Ordering::SeqCst,
             Ordering::Relaxed,
         );
+        self.inner.wake();
     }
 }
 
@@ -99,6 +101,19 @@ impl Waker {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaitError {
+    Timeout,
+}
+
+impl core::fmt::Display for WaitError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            WaitError::Timeout => write!(f, "timeout"),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct WaitGuard {
     state: Arc<AtomicU8>,
@@ -115,16 +130,29 @@ impl WaitGuard {
         Self { state }
     }
 
-    pub fn wait(&self) -> State {
+    pub fn wait(&self) {
         loop {
-            let state = self.state.load(Ordering::Acquire).into();
-            match &state {
+            match self.get_state() {
                 State::Waiting => {
                     std::thread::park();
                 }
-                _ => return state,
+                _ => return,
             }
         }
+    }
+
+    pub fn wait_deadline(&self, deadline: Instant) -> Result<(), WaitError> {
+        let mut max_park_duration = Instant::now().saturating_duration_since(deadline);
+        while !max_park_duration.is_zero() {
+            match self.get_state() {
+                State::Waiting => {
+                    std::thread::park_timeout(max_park_duration);
+                    max_park_duration = deadline.saturating_duration_since(Instant::now());
+                }
+                _ => return Ok(()),
+            }
+        }
+        Err(WaitError::Timeout)
     }
 
     pub fn get_state(&self) -> State {
@@ -144,8 +172,11 @@ mod waker_tests {
             let jh = s.spawn(move || {
                 let (waker_handle, sleeper) = Waker::new();
                 sender.send(waker_handle).expect("send failed");
-                let state = sleeper.wait();
-                assert_eq!(state, State::Notified);
+                sleeper.wait();
+                assert_eq!(
+                    State::from(sleeper.state.load(Ordering::Acquire)),
+                    State::Notified
+                );
             });
             let waker = recv.recv().expect("recv failed");
             std::thread::sleep(std::time::Duration::from_millis(100));
