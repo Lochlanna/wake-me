@@ -26,25 +26,25 @@ impl Default for Event {
 impl Event {
     pub fn listen(&self) -> WaitGuard {
         let (waker, guard) = Waker::new();
-        self.num_listeners.fetch_add(1, Ordering::SeqCst);
+        self.num_listeners.fetch_add(1, Ordering::Release);
         self.chain.push(waker).expect("couldn't push to queue");
         guard
     }
 
     pub fn listen_async(&self, waker: core::task::Waker) -> WaitGuard {
         let (waker, guard) = Waker::new_async(waker);
-        self.num_listeners.fetch_add(1, Ordering::SeqCst);
+        self.num_listeners.fetch_add(1, Ordering::Release);
         self.chain.push(waker).expect("couldn't push to queue");
         guard
     }
 
     pub fn notify_one(&self) {
         portable_atomic::fence(Ordering::SeqCst);
-        if self.num_listeners.load(Ordering::Acquire) == 0 {
+        if self.num_listeners.load(Ordering::Relaxed) == 0 {
             return;
         }
         while let Ok(node) = self.chain.pop() {
-            self.num_listeners.fetch_sub(1, Ordering::SeqCst);
+            self.num_listeners.fetch_sub(1, Ordering::Release);
             if node.wake() {
                 return;
             }
@@ -54,10 +54,10 @@ impl Event {
     // Can we add a take function to the queue to optimise this? / Would that actually be better?
     pub fn notify_all(&self) {
         portable_atomic::fence(Ordering::SeqCst);
-        let len = self.num_listeners.load(Ordering::Acquire);
+        let len = self.num_listeners.load(Ordering::Relaxed);
         for _ in 0..len {
             if let Ok(node) = self.chain.pop() {
-                self.num_listeners.fetch_sub(1, Ordering::SeqCst);
+                self.num_listeners.fetch_sub(1, Ordering::Release);
                 node.wake();
             } else {
                 return;
