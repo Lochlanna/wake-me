@@ -196,7 +196,7 @@ mod waker_tests {
                 State::from(waker.state.load(Ordering::Relaxed)),
                 State::Notified
             );
-            let _ = jh.join();
+            jh.join().expect("join failed");
         })
     }
 
@@ -217,7 +217,7 @@ mod waker_tests {
                 State::from(waker.state.load(Ordering::Relaxed)),
                 State::Dropped
             );
-            let _ = jh.join();
+            jh.join().expect("join failed");
         })
     }
 }
