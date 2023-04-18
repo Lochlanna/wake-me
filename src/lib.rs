@@ -76,14 +76,16 @@ mod tests {
             let jh = s.spawn(|| {
                 let guard = event.listen();
                 assert_eq!(value.load(Ordering::Acquire), 0);
-                assert_eq!(guard.get_state(), State::Notified);
+                assert_eq!(guard.get_state(), State::Waiting);
+                guard.wait();
                 assert_eq!(value.load(Ordering::Acquire), 42);
+                assert_eq!(guard.get_state(), State::Notified);
             });
             thread::sleep(Duration::from_millis(50));
             value.store(42, Ordering::Release);
             event.notify_one();
 
-            let _ = jh.join();
+            jh.join().expect("couldn't join!");
         })
     }
     #[test]
@@ -107,7 +109,7 @@ mod tests {
             event.notify_one();
             assert_eq!(event.chain.len(), 0);
 
-            let _ = jh.join();
+            jh.join().expect("couldn't join!");
         })
     }
 }
