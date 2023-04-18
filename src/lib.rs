@@ -4,19 +4,21 @@ mod waker;
 use concurrent_queue::ConcurrentQueue;
 
 use crate::waker::Waker;
-use portable_atomic::Ordering;
+use portable_atomic::{AtomicUsize, Ordering};
 
 pub use waker::{State, WaitGuard};
 
 #[derive(Debug)]
 pub struct Event {
     chain: ConcurrentQueue<Waker>,
+    num_listeners: AtomicUsize,
 }
 
 impl Default for Event {
     fn default() -> Self {
         Self {
             chain: ConcurrentQueue::unbounded(),
+            num_listeners: Default::default(),
         }
     }
 }
@@ -24,22 +26,25 @@ impl Default for Event {
 impl Event {
     pub fn listen(&self) -> WaitGuard {
         let (waker, guard) = Waker::new();
+        self.num_listeners.fetch_add(1, Ordering::SeqCst);
         self.chain.push(waker).expect("couldn't push to queue");
         guard
     }
 
     pub fn listen_async(&self, waker: core::task::Waker) -> WaitGuard {
         let (waker, guard) = Waker::new_async(waker);
+        self.num_listeners.fetch_add(1, Ordering::SeqCst);
         self.chain.push(waker).expect("couldn't push to queue");
         guard
     }
 
     pub fn notify_one(&self) {
         portable_atomic::fence(Ordering::SeqCst);
-        if self.chain.is_empty() {
+        if self.num_listeners.load(Ordering::Acquire) == 0 {
             return;
         }
         while let Ok(node) = self.chain.pop() {
+            self.num_listeners.fetch_sub(1, Ordering::SeqCst);
             if node.wake() {
                 return;
             }
@@ -49,8 +54,10 @@ impl Event {
     // Can we add a take function to the queue to optimise this? / Would that actually be better?
     pub fn notify_all(&self) {
         portable_atomic::fence(Ordering::SeqCst);
-        for _ in 0..self.chain.len() {
+        let len = self.num_listeners.load(Ordering::Acquire);
+        for _ in 0..len {
             if let Ok(node) = self.chain.pop() {
+                self.num_listeners.fetch_sub(1, Ordering::SeqCst);
                 node.wake();
             } else {
                 return;
